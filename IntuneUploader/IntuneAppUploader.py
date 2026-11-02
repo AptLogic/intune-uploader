@@ -392,13 +392,6 @@ class IntuneAppUploader(IntuneUploaderBase):
                     )
                 # Update the app
                 self.content_update = True
-                self.makeapirequestPatch(
-                    f'{self.BASE_ENDPOINT}/{current_app_data["id"]}',
-                    self.token,
-                    "",
-                    data,
-                    204,
-                )
                 self.request = current_app_data
 
             # If the app is up to date and the current version should not be ignored
@@ -535,11 +528,8 @@ class IntuneAppUploader(IntuneUploaderBase):
         # Wait for the file to upload
         self.wait_for_file_upload()
 
-        # Patch the app to use the new content version
-        data = {
-            "@odata.type": app_data_dict["@odata.type"],
-            "committedContentVersion": self.content_version_request["id"],
-        }
+        data = app_data_dict.copy()
+        data["committedContentVersion"] = self.content_version_request["id"]
 
         self.makeapirequestPatch(
             f"{self.BASE_ENDPOINT}/{self.request['id']}",
