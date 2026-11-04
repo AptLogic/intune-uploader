@@ -3,7 +3,7 @@ repos:
     rev: v1.12.4
     hooks:
       - id: check-autopkg-recipes
-        args: ["--recipe-prefix=com.github.almenscorner.", "--strict", "--"]
+        args: ["--recipe-prefix=com.github.aptlogic.", "--strict", "--"]
         exclude: ^Scripts/Template\.intune\.recipe$
       - id: forbid-autopkg-overrides
       - id: forbid-autopkg-trust-info

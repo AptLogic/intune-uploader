@@ -509,11 +509,10 @@ class IntuneAppUploader(IntuneUploaderBase):
                 self.delete_app()
                 raise ProcessorError("Failed to get the Azure Storage upload URL")
 
-        # Create the block list
-        self.create_blocklist(tempfilename, file_content_request["azureStorageUri"])
-
-        # Clean up temp file
-        os.unlink(tempfilename)
+        try:
+            self.create_blocklist(tempfilename, file_content_request["azureStorageUri"])
+        finally:
+            os.unlink(tempfilename)
 
         # Commit the file
         data = json.dumps({"fileEncryptionInfo": encryptionInfo})

@@ -16,6 +16,8 @@ import time
 
 import requests
 from autopkglib import Processor, ProcessorError
+from azure.core.exceptions import AzureError, HttpResponseError
+from azure.storage.blob import BlobClient
 from cryptography.hazmat.primitives import padding
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 
@@ -425,71 +427,41 @@ class IntuneUploaderBase(Processor):
         return appFile
 
     def create_blocklist(self, file_path: str, azure_storage_uri: str) -> None:
-        """Uploads a file to Azure Blob Storage using the block list upload mechanism.
+        """Uploads an encrypted file using the Azure Blob Storage SDK.
 
         Args:
             file_path (str): The path to the file to upload.
-            azure_storage_uri (str): The URI of the Azure Blob Storage container to upload the file to.
+            azure_storage_uri (str): The Graph-provided blob URL, including its SAS token.
         """
-        # Set the chunk size to 6 MB
         chunk_size = 6 * 1024 * 1024
-
-        # Open the file in binary mode
-        with open(file_path, "rb") as f:
-            # Initialize the block IDs list and the block index
-            block_ids = []
-            block_index = 0
-
-            # Read the file in chunks and upload each chunk as a block
-            while True:
-                chunk = f.read(chunk_size)
-                if not chunk:
-                    break
-
-                # Generate a block ID for the current chunk
-                block_id = base64.b64encode(f"block-{block_index:04}".encode()).decode()
-
-                # Upload the chunk as a block
-                uri = f"{azure_storage_uri}&comp=block&blockid={block_id}"
-                headers = {"x-ms-blob-type": "BlockBlob"}
-                try:
-                    r = requests.put(uri, headers=headers, data=chunk)
-                except:
-                    raise ProcessorError("Failed to upload block")
-
-                # Add the block ID to the list of block IDs
-                block_ids.append(block_id)
-
-                # Increment the block index
-                block_index += 1
-
-            # Generate the block list XML
-            block_list_xml = "<BlockList>"
-            for block_id in block_ids:
-                block_list_xml += f"<Latest>{block_id}</Latest>"
-            block_list_xml += "</BlockList>"
-
-            # Upload the block list XML
-            uri = f"{azure_storage_uri}&comp=blocklist"
-            headers = {"Content-Type": "application/xml"}
-            r = requests.put(uri, headers=headers, data=block_list_xml)
-
-            # retry 5 times if the upload fails with exponential backoff
-            if r.status_code != 201:
-                attempt = 1
-                while attempt <= 5:
-                    wait_time = 2**attempt
-                    self.output(
-                        f"Failed to upload block list, retrying in {wait_time} seconds..."
-                    )
-                    time.sleep(wait_time)
-                    r = requests.put(uri, headers=headers, data=block_list_xml)
-                    if r.status_code == 201:
-                        break
-                    attempt += 1
-            if r.status_code != 201:
+        try:
+            with open(file_path, "rb") as data:
+                with BlobClient.from_blob_url(
+                    azure_storage_uri,
+                    max_block_size=chunk_size,
+                    max_single_put_size=chunk_size,
+                    retry_total=5,
+                    retry_connect=5,
+                    retry_read=5,
+                    retry_status=5,
+                    connection_timeout=30,
+                    read_timeout=120,
+                ) as blob_client:
+                    blob_client.upload_blob(data, overwrite=True, max_concurrency=1)
+        except AzureError as error:
+            try:
                 self.delete_app()
-                raise ProcessorError("Failed to upload block list")
+            except ProcessorError as cleanup_error:
+                self.output(
+                    f"Failed to clean up app after upload failure: {cleanup_error}"
+                )
+            details = type(error).__name__
+            if isinstance(error, HttpResponseError):
+                details += f", HTTP {error.status_code}"
+            # SDK transport errors can include the SAS URL.
+            raise ProcessorError(
+                f"Failed to upload encrypted app to Azure Blob Storage ({details})."
+            ) from None
 
     def get_file_content_status(self) -> dict:
         """Returns the status of a file upload.
@@ -506,7 +478,9 @@ class IntuneUploaderBase(Processor):
         """
         if self.request.get("id") and self.content_update is False:
             self.makeapirequestDelete(
-                f"{self.BASE_ENDPOINT}/{self.request['id']}", self.token
+                f"{self.BASE_ENDPOINT}/{self.request['id']}",
+                self.token,
+                status_code=204,
             )
 
     def wait_for_file_upload(self) -> None:

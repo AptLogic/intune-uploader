@@ -22,6 +22,29 @@ Join the discussions on Slack  <a href="https://macadmins.slack.com/archives/C05
     <img height="25" src="https://cdn4.iconfinder.com/data/icons/logos-and-brands/512/306_Slack_logo-256.png"/>
 </a>
 
+## Dependencies and installer uploads
+
+Install the Python dependencies into AutoPkg's Python environment. From the
+repository root, run:
+
+```sh
+/usr/local/autopkg/python -m pip install -r IntuneUploader/requirements.txt
+```
+
+Installer transfers use the Azure Blob Storage SDK with the temporary SAS URL
+provided by Microsoft Graph. No separate storage-account credentials are needed.
+Encrypted files up to 6 MiB use a single upload request; larger files use
+sequential blocks of up to 6 MiB. The SDK manages the block list and retries
+eligible connection, read, and service failures up to five times per request,
+using exponential backoff. Connection and read timeouts are 30 and 120 seconds,
+respectively; these are not an overall upload deadline.
+
+An SDK upload failure stops the processor, removes the encrypted temporary file,
+and attempts to delete a newly created app. Existing apps being updated are not
+deleted. Encryption and the subsequent Microsoft Graph commit flow are unchanged.
+Expired SAS URLs are not automatically renewed, and interrupted uploads do not
+resume across processor restarts.
+
 ### IntuneAppUploader - LOB apps (managed PKG)
 LOB type apps support has been added. It is required that you provide a pkg file that is signed with a valid Apple Developer ID certificate and notarized. This app type can be deploy apps in a "available" manner rather than "required". This means that the user can choose to install the app or not. This is useful for apps that are not required for the user to do their job, but are nice to have.
 
@@ -38,3 +61,9 @@ Some ground rules before submitting a PR,
 * Install [pre-commit](https://pre-commit.com)
    * Once installed, run `pre-commit install` in the forked repo
 * Make sure all tests pass before submitting a PR
+
+Run the upload tests using a Python environment with the dependencies installed:
+
+```sh
+python -m unittest discover -s tests -v
+```
